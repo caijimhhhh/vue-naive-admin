@@ -122,6 +122,12 @@
 <script setup>
 import MarkdownIt from 'markdown-it'
 import markdownItCharts from 'markdown-it-charts'
+import markdownItMultimdTable from 'markdown-it-multimd-table'
+import markdownItContainer from 'markdown-it-container'
+import markdownItKatex from 'markdown-it-katex'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/github.css'
+import 'katex/dist/katex.min.css'
 import * as echarts from 'echarts'
 import { ref, watch, nextTick, onMounted, computed, onUnmounted } from 'vue'
 import {
@@ -176,16 +182,62 @@ const { apiKey, apiBaseUrl } = computed(() => {
 
 const chatApi = createChatApiClient(apiBaseUrl, apiKey)
 
-// 创建 markdown-it 实例并配置 charts 插件
+// 创建 markdown-it 实例并配置插件
 const md = new MarkdownIt({
   html: true,
   breaks: true,
-  linkify: true
-}).use(markdownItCharts, {
+  linkify: true,
+  highlight: function (str, lang) {
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return '<pre class="hljs"><code>' +
+               hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
+               '</code></pre>'
+      } catch (__) {}
+    }
+    return '<pre class="hljs"><code>' + md.utils.escapeHtml(str) + '</code></pre>'
+  }
+})
+.use(markdownItKatex, {
+  throwOnError: false,
+  errorColor: '#cc0000'
+})
+.use(markdownItCharts, {
   echarts: echarts,
   useCache: true,
   container: {
     style: 'min-height: 400px; width: 100%; margin: 1em 0;'
+  }
+})
+.use(markdownItMultimdTable, {
+  multiline: true,
+  rowspan: true,
+  headerless: true
+})
+.use(markdownItContainer, 'info', {
+  validate: function(params) {
+    return params.trim().match(/^info\s+(.*)$/)
+  },
+  render: function (tokens, idx) {
+    if (tokens[idx].nesting === 1) {
+      const m = tokens[idx].info.trim().match(/^info\s+(.*)$/)
+      return '<div class="info-container"><p class="info-title">' + md.utils.escapeHtml(m[1]) + '</p>\n'
+    } else {
+      return '</div>\n'
+    }
+  }
+})
+.use(markdownItContainer, 'warning', {
+  validate: function(params) {
+    return params.trim().match(/^warning\s+(.*)$/)
+  },
+  render: function (tokens, idx) {
+    if (tokens[idx].nesting === 1) {
+      const m = tokens[idx].info.trim().match(/^warning\s+(.*)$/)
+      return '<div class="warning-container"><p class="warning-title">' + md.utils.escapeHtml(m[1]) + '</p>\n'
+    } else {
+      return '</div>\n'
+    }
   }
 })
 
@@ -679,28 +731,6 @@ onMounted(async () => {
   await store.loadDictData()
   await fetchConversations()
 })
-
-// 修改消息监听，只在内容真正变化时初始化图表
-watch(messages, (newVal, oldVal) => {
-  // 只有当消息内容真正改变时才初始化图表
-  const hasContentChanged = newVal.some((msg, index) => {
-    const oldMsg = oldVal[index]
-    return !oldMsg || msg.content !== oldMsg.content
-  })
-
-  if (hasContentChanged) {
-    nextTick(() => {
-      initCharts()
-    })
-  }
-}, { deep: true })
-
-// 保持滚动到底部的功能
-watch(messages, (newMessages) => {
-  nextTick(() => {
-    scrollToBottom()
-  })
-}, { deep: true })
 
 // 监听 activeKey 变化
 watch(activeKey, (newKey) => {
