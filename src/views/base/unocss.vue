@@ -46,20 +46,81 @@
                   alt="AI Avatar" />
                 <div class="message-box">
                   <div class="message-content markdown-body">
-                    <a-spin v-if="item.loading" />
-                    <div v-else>
-                      <div class="message-content-inner" v-html="renderMarkdown(item.content)"></div>
-                      <div v-if="item.role === 'ai' && !isFirstAIMessage(item) && !item.loading"
-                        class="message-actions">
-                        <div style="font-size: smaller; color: #454545">此条回答对您是否有帮助？</div>
-                        <a @click="likeMessage(item.key)" :class="{ 'active': item.liked }">
-                          <HeartTwoTone :twoToneColor="item.liked ? '#eb2f96' : '#000000'" />
-                        </a>
-                        <a @click="() => dislikeMessage(item.key, item.content)" :class="{ 'active': item.disliked }">
-                          <FrownOutlined :style="{ color: item.disliked ? '#1890ff' : '#000000' }" />
-                        </a>
-                      </div>
+                    <a-spin v-if="item.loading && !item.workflow" />
+                    <div v-if="item.workflow" class="workflow-process">
+                      <a-collapse :defaultActiveKey="['1']">
+                        <a-collapse-panel key="1">
+                          <template #header>
+                            <span>
+                              <loading-outlined v-if="item.workflow.status === 'running'" spin />
+                              <check-circle-outlined v-else-if="item.workflow.status === 'succeeded'"
+                                style="color: #52c41a" />
+                              <close-circle-outlined v-else-if="item.workflow.status === 'failed'"
+                                style="color: #ff4d4f" />
+                              <stop-outlined v-else-if="item.workflow.status === 'stopped'" style="color: #faad14" />
+                              工作流程展示
+                            </span>
+                          </template>
+                          <div class="workflow-steps">
+                            <!-- 主流程步骤 -->
+                            <template v-for="step in item.workflow.steps" :key="step.id">
+                              <!-- 普通步骤 -->
+                              <div v-if="!step.parallel_id" class="workflow-step">
+                                <span class="step-icon">
+                                  <loading-outlined v-if="step.status === 'running'" spin />
+                                  <check-circle-outlined v-else-if="step.status === 'succeeded'" style="color: #52c41a" />
+                                  <close-circle-outlined v-else-if="step.status === 'failed'" style="color: #ff4d4f" />
+                                  <stop-outlined v-else-if="step.status === 'stopped'" style="color: #faad14" />
+                                </span>
+                                <span class="step-title">{{ step.title }}</span>
+                                <span class="step-time" v-if="step.elapsed_time">{{ step.elapsed_time > 1000 ? (step.elapsed_time / 1000).toFixed(2) + 's' : step.elapsed_time.toFixed(2) + 'ms' }}</span>
+                              </div>
+                              <!-- 并行分支 -->
+                              <div v-else-if="isParallelStartNode(step, item.workflow.steps)" class="workflow-parallel">
+                                <div class="parallel-header">并行分支</div>
+                                <div class="parallel-branches">
+                                  <div v-for="branch in getParallelBranches(step.parallel_id, item.workflow.steps)"
+                                    :key="branch.id" class="parallel-branch">
+                                    <div class="branch-header">分支 {{ branch.branch_index + 1 }}</div>
+                                    <div v-for="branchStep in branch.steps" :key="branchStep.id"
+                                      class="workflow-step branch-step">
+                                      <span class="step-icon">
+                                        <loading-outlined v-if="branchStep.status === 'running'" spin />
+                                        <check-circle-outlined v-else-if="branchStep.status === 'succeeded'"
+                                          style="color: #52c41a" />
+                                        <close-circle-outlined v-else-if="branchStep.status === 'failed'"
+                                          style="color: #ff4d4f" />
+                                        <stop-outlined v-else-if="branchStep.status === 'stopped'"
+                                          style="color: #faad14" />
+                                      </span>
+                                      <span class="step-title">{{ branchStep.title }}</span>
+                                      <span class="step-time" v-if="branchStep.elapsed_time">
+                                        {{ branchStep.elapsed_time > 1000 ? (branchStep.elapsed_time / 1000).toFixed(2) + 's' : branchStep.elapsed_time.toFixed(2) + 'ms' }}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </template>
+                          </div>
+                        </a-collapse-panel>
+                      </a-collapse>
                     </div>
+                    <template v-if="!item.loading || (item.workflow && item.workflow.status !== 'running')">
+                      <div>
+                        <div class="message-content-inner" v-html="renderMarkdown(item.content)"></div>
+                        <div v-if="item.role === 'ai' && !isFirstAIMessage(item)"
+                          class="message-actions">
+                          <div style="font-size: smaller; color: #454545">此条回答对您是否有帮助？</div>
+                          <a @click="likeMessage(item.key)" :class="{ 'active': item.liked }">
+                            <HeartTwoTone :twoToneColor="item.liked ? '#eb2f96' : '#000000'" />
+                          </a>
+                          <a @click="() => dislikeMessage(item.key, item.content)" :class="{ 'active': item.disliked }">
+                            <FrownOutlined :style="{ color: item.disliked ? '#1890ff' : '#000000' }" />
+                          </a>
+                        </div>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </div>
@@ -84,8 +145,8 @@
               <!-- 当没有会话时，显示中央输入框 -->
               <div v-if="!currentSession" class="center-input-container">
                 <div class="input-wrapper">
-                  <a-input v-model:value="content" :disabled="isMessageSending"
-                    @pressEnter="() => onSubmit(content)" placeholder="请输入问题..." class="chat-input" />
+                  <a-input v-model:value="content" :disabled="isMessageSending" @pressEnter="() => onSubmit(content)"
+                    placeholder="请输入问题..." class="chat-input" />
                   <a-button type="primary" :disabled="isMessageSending" @click="() => onSubmit(content)"
                     class="send-btn">
                     <template #icon>
@@ -100,10 +161,9 @@
 
         <div v-if="currentSession" class="sender">
           <div class="input-wrapper">
-            <a-input v-model:value="content" :disabled="isMessageSending"
-              @pressEnter="() => onSubmit(content)" placeholder="请输入问题..." class="chat-input" />
-            <a-button type="primary" :disabled="isMessageSending" @click="() => onSubmit(content)"
-              class="send-btn">
+            <a-input v-model:value="content" :disabled="isMessageSending" @pressEnter="() => onSubmit(content)"
+              placeholder="请输入问题..." class="chat-input" />
+            <a-button type="primary" :disabled="isMessageSending" @click="() => onSubmit(content)" class="send-btn">
               <template #icon>
                 <SendOutlined />
               </template>
@@ -136,6 +196,10 @@ import {
   DeleteOutlined,
   FrownOutlined,
   HeartTwoTone,
+  LoadingOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  StopOutlined,
 } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import { createChatApiClient } from './api'
@@ -154,8 +218,17 @@ const feedbackKey = ref('')
 const currentPage = ref(1)
 const pageSize = ref(10)
 const paginatedConversations = computed(() => {
+  const totalItems = conversationsItems.value.length
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize.value))
+  
+  // 确保当前页不超出范围
+  if (currentPage.value > totalPages) {
+    currentPage.value = totalPages
+  }
+  
   const startIndex = (currentPage.value - 1) * pageSize.value
-  const endIndex = startIndex + pageSize.value
+  const endIndex = Math.min(startIndex + pageSize.value, totalItems)
+  
   return conversationsItems.value.slice(startIndex, endIndex)
 })
 
@@ -169,6 +242,10 @@ const currentStreamController = ref(null)
 const messages = ref([])
 const items = ref([])
 const messagesContainer = ref(null)
+
+// 工作流相关状态
+const currentWorkflow = ref(null)
+const workflowSteps = ref([])
 
 // 初始化 API 客户端
 const store = dictStore()
@@ -191,55 +268,55 @@ const md = new MarkdownIt({
     if (lang && hljs.getLanguage(lang)) {
       try {
         return '<pre class="hljs"><code>' +
-               hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
-               '</code></pre>'
-      } catch (__) {}
+          hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
+          '</code></pre>'
+      } catch (__) { }
     }
     return '<pre class="hljs"><code>' + md.utils.escapeHtml(str) + '</code></pre>'
   }
 })
-.use(markdownItKatex, {
-  throwOnError: false,
-  errorColor: '#cc0000'
-})
-.use(markdownItCharts, {
-  echarts: echarts,
-  useCache: true,
-  container: {
-    style: 'min-height: 400px; width: 100%; margin: 1em 0;'
-  }
-})
-.use(markdownItMultimdTable, {
-  multiline: true,
-  rowspan: true,
-  headerless: true
-})
-.use(markdownItContainer, 'info', {
-  validate: function(params) {
-    return params.trim().match(/^info\s+(.*)$/)
-  },
-  render: function (tokens, idx) {
-    if (tokens[idx].nesting === 1) {
-      const m = tokens[idx].info.trim().match(/^info\s+(.*)$/)
-      return '<div class="info-container"><p class="info-title">' + md.utils.escapeHtml(m[1]) + '</p>\n'
-    } else {
-      return '</div>\n'
+  .use(markdownItKatex, {
+    throwOnError: false,
+    errorColor: '#cc0000'
+  })
+  .use(markdownItCharts, {
+    echarts: echarts,
+    useCache: true,
+    container: {
+      style: 'min-height: 400px; width: 100%; margin: 1em 0;'
     }
-  }
-})
-.use(markdownItContainer, 'warning', {
-  validate: function(params) {
-    return params.trim().match(/^warning\s+(.*)$/)
-  },
-  render: function (tokens, idx) {
-    if (tokens[idx].nesting === 1) {
-      const m = tokens[idx].info.trim().match(/^warning\s+(.*)$/)
-      return '<div class="warning-container"><p class="warning-title">' + md.utils.escapeHtml(m[1]) + '</p>\n'
-    } else {
-      return '</div>\n'
+  })
+  .use(markdownItMultimdTable, {
+    multiline: true,
+    rowspan: true,
+    headerless: true
+  })
+  .use(markdownItContainer, 'info', {
+    validate: function (params) {
+      return params.trim().match(/^info\s+(.*)$/)
+    },
+    render: function (tokens, idx) {
+      if (tokens[idx].nesting === 1) {
+        const m = tokens[idx].info.trim().match(/^info\s+(.*)$/)
+        return '<div class="info-container"><p class="info-title">' + md.utils.escapeHtml(m[1]) + '</p>\n'
+      } else {
+        return '</div>\n'
+      }
     }
-  }
-})
+  })
+  .use(markdownItContainer, 'warning', {
+    validate: function (params) {
+      return params.trim().match(/^warning\s+(.*)$/)
+    },
+    render: function (tokens, idx) {
+      if (tokens[idx].nesting === 1) {
+        const m = tokens[idx].info.trim().match(/^warning\s+(.*)$/)
+        return '<div class="warning-container"><p class="warning-title">' + md.utils.escapeHtml(m[1]) + '</p>\n'
+      } else {
+        return '</div>\n'
+      }
+    }
+  })
 
 // 滚动到最底部的函数
 const scrollToBottom = () => {
@@ -263,24 +340,24 @@ const initCharts = () => {
         // 先设置容器高度
         container.style.height = '400px'
         container.style.width = '100%'
-        
+
         const chartData = JSON.parse(dataElement.textContent)
         // 确保容器有尺寸后再初始化
         const chart = echarts.init(container)
         chart.setOption(chartData)
-        
+
         // 添加响应式调整
         const resizeHandler = () => {
           chart.resize()
         }
         window.addEventListener('resize', resizeHandler)
-        
+
         // 清理之前的事件监听器
         const cleanup = () => {
           window.removeEventListener('resize', resizeHandler)
           chart.dispose()
         }
-        
+
         // 存储清理函数，以便在组件卸载时调用
         container._cleanup = cleanup
       } catch (error) {
@@ -329,15 +406,15 @@ const dislikeMessage = async (key, content) => {
     try {
       // 确定要发送的反馈类型
       let feedbackType = 'dislike';
-      
+
       // 如果已经点踩，再次点击则取消点踩
       if (messages.value[messageIndex].disliked) {
         feedbackType = null;
       }
-      
+
       // 使用真实的消息ID而不是前端生成的key
       await chatApi.sendFeedback(messages.value[messageIndex].id, feedbackType, 'abc-123')
-      
+
       // 更新本地状态
       if (feedbackType === null) {
         // 取消点踩
@@ -347,18 +424,18 @@ const dislikeMessage = async (key, content) => {
         messages.value[messageIndex].disliked = true;
         messages.value[messageIndex].liked = false;
       }
-      
+
       messages.value = [...messages.value]
-      
+
       // 显示反馈消息
       feedbackMessage.value = '感谢您的反馈！'
       feedbackKey.value = key
-      
+
       // 3秒后清除反馈消息
       setTimeout(() => {
         feedbackMessage.value = ''
       }, 3000)
-      
+
     } catch (error) {
       console.error('发送反馈失败:', error)
       message.error('发送反馈失败')
@@ -423,7 +500,128 @@ const handlePageChange = (page) => {
   currentPage.value = page
 }
 
-// 提交消息
+// 处理工作流事件
+const handleWorkflowEvent = (data) => {
+  // 使用 workflow_run_id 来查找对应的消息
+  const messageIndex = messages.value.findIndex(m => 
+    (m.workflow && m.workflow.id === data.workflow_run_id) || 
+    (!m.workflow && m.loading)
+  )
+  
+  if (messageIndex === -1) return
+
+  if (!messages.value[messageIndex].workflow) {
+    messages.value[messageIndex].workflow = {
+      id: data.workflow_run_id,
+      status: 'running',
+      steps: [],
+      branches: new Map() // 添加分支信息存储
+    }
+  }
+
+  const workflow = messages.value[messageIndex].workflow  
+  console.log('Workflow event:', data.event, data)  // 添加日志
+
+  switch (data.event) {
+    case 'workflow_started':
+      workflow.status = 'running'
+      workflow.id = data.workflow_run_id
+      messages.value[messageIndex].loading = true
+      break
+
+    case 'parallel_branch_started':
+      if (!workflow.branches.has(data.data.parallel_id)) {
+        workflow.branches.set(data.data.parallel_id, new Set())
+      }
+      workflow.branches.get(data.data.parallel_id).add(data.data.parallel_branch_id)
+      break
+
+    case 'node_started':
+      workflow.steps.push({
+        id: data.data.id,
+        title: data.data.title,
+        status: 'running',
+        node_type: data.data.node_type,
+        start_time: data.data.created_at,
+        parallel_id: data.data.parallel_id,
+        parallel_start_node_id: data.data.parallel_start_node_id,
+        parent_parallel_id: data.data.parent_parallel_id,
+        parent_parallel_start_node_id: data.data.parent_parallel_start_node_id
+      })
+      break
+
+    case 'node_finished':
+      const stepIndex = workflow.steps.findIndex(s => s.id === data.data.id)
+      if (stepIndex !== -1) {
+        workflow.steps[stepIndex] = {
+          ...workflow.steps[stepIndex],
+          status: data.data.status,
+          elapsed_time: data.data.elapsed_time * 1000,
+          error: data.data.error
+        }
+      }
+      break
+
+    case 'parallel_branch_finished':
+      // 可以在这里处理分支完成的逻辑
+      break
+
+    case 'workflow_finished':
+      workflow.status = data.data.status
+      workflow.elapsed_time = data.data.elapsed_time
+      workflow.error = data.data.error
+      if (data.data.status === 'succeeded') {
+        messages.value[messageIndex].loading = false
+      }
+      break
+  }
+
+  messages.value = [...messages.value]
+  items.value = [...messages.value]
+}
+
+// 判断是否为并行分支的起始节点
+const isParallelStartNode = (step, allSteps) => {
+  if (!step.parallel_id) return false
+  
+  // 检查是否是该并行分支中的第一个节点
+  const parallelSteps = allSteps.filter(s => s.parallel_id === step.parallel_id)
+  const firstStepInParallel = parallelSteps.reduce((first, current) => 
+    (!first || current.index < first.index) ? current : first
+  , null)
+  
+  return firstStepInParallel && firstStepInParallel.id === step.id
+}
+
+// 获取特定并行分支 ID 下的所有分支
+const getParallelBranches = (parallelId, steps) => {
+  if (!parallelId) return []
+
+  // 获取属于这个并行分支的所有步骤
+  const parallelSteps = steps.filter(step => step.parallel_id === parallelId)
+  
+  // 获取所有唯一的分支ID
+  const branchIds = [...new Set(parallelSteps.map(step => step.parallel_start_node_id))]
+  
+  // 按照分支分组并排序
+  return branchIds.map((branchId, index) => {
+    const branchSteps = parallelSteps.filter(step => step.parallel_start_node_id === branchId)
+    return {
+      id: branchId,
+      branch_index: index,
+      steps: branchSteps.sort((a, b) => {
+        // 首先按照索引排序
+        if (a.index !== b.index) {
+          return a.index - b.index
+        }
+        // 如果索引相同，按照创建时间排序
+        return (a.start_time || 0) - (b.start_time || 0)
+      })
+    }
+  })
+}
+
+// 修改 sendStreamingChatMessage 中的 onMessage 处理
 const onSubmit = async (nextContent) => {
   if (!nextContent || isMessageSending.value) return
 
@@ -439,67 +637,87 @@ const onSubmit = async (nextContent) => {
     role: 'local'
   }
   messages.value.push(newMessage)
-  // 同步更新 items 数组
-  items.value = [...messages.value]
-  
-  // 清空输入框内容 - 确保在添加消息后立即清空
-  content.value = ''
 
   // 添加 AI 消息（带 loading 状态）
   const aiMessage = {
     key: `msg_${currentMessageIndex + 2}`,
     role: 'ai',
     content: '',
-    loading: true
+    loading: true,
+    workflow: null // 初始化workflow为null
   }
   messages.value.push(aiMessage)
+  
   // 同步更新 items 数组
   items.value = [...messages.value]
+
+  // 清空输入框内容 - 确保在添加消息后立即清空
+  content.value = ''
 
   // 滚动到最底部
   setTimeout(scrollToBottom)
 
   try {
-    // 使用流式API发送消息
     const controller = await chatApi.sendStreamingChatMessage(
       {
         query: nextContent,
         user: 'abc-123',
-        conversation_id: currentSession.value || '' // 如果没有会话ID，传空字符串让API自动创建
+        conversation_id: currentSession.value || '',
+        auto_generate_name: !currentSession.value
       },
-      (data) => {
+      async (data) => {
+        console.log('Received event:', data.event, data)  // 添加日志
+        
+        if ([
+          'workflow_started',
+          'node_started',
+          'node_finished',
+          'workflow_finished',
+          'parallel_branch_started',
+          'parallel_branch_finished'
+        ].includes(data.event)) {
+          handleWorkflowEvent(data)
+          return
+        }
+
         // 处理消息事件
         if (data.event === 'message') {
           const messageIndex = messages.value.findIndex(m => m.loading || m.key === `msg_${currentMessageIndex + 2}`)
           if (messageIndex !== -1) {
-            // 累积内容而不是替换 - 这是关键修改
             const currentContent = messages.value[messageIndex].content || '';
             const newContent = currentContent + (data.answer || '');
             
             messages.value[messageIndex] = {
               ...messages.value[messageIndex],
               content: newContent,
+              // 移除对 workflow 的依赖，单独处理消息的 loading 状态
               loading: false,
-              // 保存API返回的真实消息ID用于反馈
               id: data.id || messages.value[messageIndex].id
             }
-            // 强制更新视图
             items.value = [...messages.value]
             nextTick(() => {
               scrollToBottom()
             })
           }
         } else if (data.event === 'message_end') {
-          // 如果是新会话，保存会话ID
-          currentSession.value = data.conversation_id
-          // 刷新会话列表
-          fetchConversations()
+          // 如果是新会话，保存会话ID并自动重命名
+          if (!currentSession.value && data.conversation_id) {
+            currentSession.value = data.conversation_id
+            // 使用第一条用户消息作为会话名称的一部分
+            const truncatedQuery = nextContent.length > 20 ? nextContent.substring(0, 20) + '...' : nextContent
+            await chatApi.renameConversation(data.conversation_id, {
+              name: truncatedQuery,
+              user: 'abc-123'
+            })
+            // 刷新会话列表以显示新名称
+            await fetchConversations()
+          }
         }
       },
       (error) => {
         console.error('Chat error:', error)
         message.error('发送消息失败，请重试')
-        
+
         // 更新错误状态
         const messageIndex = messages.value.findIndex(m => m.loading)
         if (messageIndex !== -1) {
@@ -518,11 +736,11 @@ const onSubmit = async (nextContent) => {
 
     // 保存控制器以便可以中断请求
     currentStreamController.value = controller
-    
+
   } catch (error) {
     console.error('Chat request failed:', error)
     isMessageSending.value = false
-    
+
     // 显示错误消息
     const messageIndex = messages.value.findIndex(m => m.loading)
     if (messageIndex !== -1) {
@@ -558,19 +776,19 @@ const selectSession = async (sessionId) => {
   // 先设置会话ID，确保输入框显示
   currentSession.value = sessionId
   console.log('选择会话:', sessionId)
-  
+
   try {
     const response = await chatApi.getMessages(sessionId, 'abc-123')
     console.log('API响应数据:', response.data) // 调试日志
-    
+
     if (response.data && Array.isArray(response.data.data)) {
       // 创建一个新的消息数组
       const processedMessages = [];
-      
+
       // 处理每条API返回的消息
       response.data.data.forEach((msg, index) => {
         console.log('处理消息:', msg) // 调试日志
-        
+
         // 如果有查询，添加用户消息
         if (msg.query) {
           processedMessages.push({
@@ -580,7 +798,7 @@ const selectSession = async (sessionId) => {
             loading: false
           });
         }
-        
+
         // 如果有回答，添加AI消息
         if (msg.answer) {
           processedMessages.push({
@@ -594,7 +812,7 @@ const selectSession = async (sessionId) => {
             id: msg.id // 保存真实的消息ID
           });
         }
-        
+
         // 如果既没有query也没有answer，但有content，根据role添加消息
         if (!msg.query && !msg.answer && msg.content) {
           processedMessages.push({
@@ -608,15 +826,15 @@ const selectSession = async (sessionId) => {
           });
         }
       });
-      
+
       console.log('处理后的消息:', processedMessages) // 调试日志
-      
+
       // 更新消息数组
       messages.value = processedMessages;
-      
+
       // 同步更新 items 数组
       items.value = [...messages.value];
-      
+
       // 确保DOM更新后滚动到底部
       nextTick(() => {
         console.log('DOM更新后，准备滚动到底部') // 调试日志
@@ -639,7 +857,7 @@ const onAddConversation = async () => {
   currentSession.value = ''
   messages.value = []
   items.value = []
-  
+
   // 确保滚动到底部以显示中央输入框
   nextTick(() => {
     scrollToBottom()
@@ -662,17 +880,17 @@ const confirmDeleteSession = (sessionId) => {
 const deleteSession = async (sessionId) => {
   try {
     await chatApi.deleteConversation(sessionId, 'abc-123')
-    
+
     // 从会话列表中移除
     conversationsItems.value = conversationsItems.value.filter(item => item.key !== sessionId)
-    
+
     // 如果删除的是当前会话，清空消息列表
     if (currentSession.value === sessionId) {
       messages.value = []
       items.value = []
       currentSession.value = ''
     }
-    
+
     message.success('会话已成功删除')
   } catch (error) {
     console.error('删除会话失败:', error)
@@ -687,15 +905,15 @@ const likeMessage = async (key) => {
     try {
       // 确定要发送的反馈类型
       let feedbackType = 'like';
-      
+
       // 如果已经点赞，再次点击则取消点赞
       if (messages.value[messageIndex].liked) {
         feedbackType = null;
       }
-      
+
       // 使用真实的消息ID而不是前端生成的key
       await chatApi.sendFeedback(messages.value[messageIndex].id, feedbackType, 'abc-123')
-      
+
       // 更新本地状态
       if (feedbackType === null) {
         // 取消点赞
@@ -705,18 +923,18 @@ const likeMessage = async (key) => {
         messages.value[messageIndex].liked = true;
         messages.value[messageIndex].disliked = false;
       }
-      
+
       messages.value = [...messages.value]
-      
+
       // 显示反馈消息
       feedbackMessage.value = '感谢您的反馈！'
       feedbackKey.value = key
-      
+
       // 3秒后清除反馈消息
       setTimeout(() => {
         feedbackMessage.value = ''
       }, 3000)
-      
+
     } catch (error) {
       console.error('发送反馈失败:', error)
       message.error('发送反馈失败')
@@ -740,4 +958,90 @@ watch(activeKey, (newKey) => {
 
 </script>
 <style src="@/assets/app.css"></style>
+<style>
+.workflow-parallel {
+  margin: 8px 0;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  padding: 8px;
+}
 
+.parallel-header {
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: #1890ff;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  height: 20px;
+}
+
+.parallel-header::before {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 12px;
+  background-color: #1890ff;
+  margin-right: 6px;
+  border-radius: 1px;
+}
+
+.parallel-branches {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.parallel-branch {
+  background: #fafafa;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border-left: 2px solid #1890ff;
+}
+
+.branch-header {
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #666;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  height: 18px;
+}
+
+.branch-step {
+  margin-left: 4px;
+  border: 1px solid #f0f0f0;
+}
+
+.workflow-step {
+  display: flex;
+  align-items: center;
+  margin: 4px 0;
+  padding: 4px 8px;
+  background: #fff;
+  border-radius: 4px;
+  min-height: 28px;
+}
+
+.step-icon {
+  margin-right: 6px;
+  display: flex;
+  align-items: center;
+}
+
+.step-title {
+  flex: 1;
+  color: #333;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.step-time {
+  color: #999;
+  font-size: 11px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+</style>
